@@ -1,0 +1,74 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg-primary: #0a0a0b;
+  --bg-secondary: #111113;
+  --bg-tertiary: #1a1a1e;
+  --border: #2a2a2e;
+  --text-primary: #f0f0f2;
+  --text-secondary: #8a8a96;
+  --accent: #f97316;
+  --accent-dim: rgba(249, 115, 22, 0.15);
+  --red: #ef4444;
+  --green: #22c55e;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: 'DM Sans', sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: var(--bg-primary);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #3a3a3e;
+}
+
+/* Heatmap bar animation */
+@keyframes heatPulse {
+  0%, 100% { opacity: 0.8; }
+  50% { opacity: 1; }
+}
+
+.heat-bar:hover {
+  animation: heatPulse 1s ease-in-out infinite;
+}
+
+/* Fade in */
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-in {
+  animation: fadeInUp 0.4s ease-out forwards;
+}
+
+.animate-fade-in-delay-1 { animation-delay: 0.1s; opacity: 0; }
+.animate-fade-in-delay-2 { animation-delay: 0.2s; opacity: 0; }
+.animate-fade-in-delay-3 { animation-delay: 0.3s; opacity: 0; }
