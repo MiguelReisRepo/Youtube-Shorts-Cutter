@@ -17,13 +17,23 @@ export async function detectSceneChanges(
   windowSizeS: number = 2,
   sceneThreshold: number = 0.3,
 ): Promise<HeatmapPoint[]> {
-  console.log('[scene] Detecting scene changes...');
+  const isLong = videoDurationS > 1800;  // > 30 min
+  const isVeryLong = videoDurationS > 7200; // > 2 hr
 
-  return new Promise((resolve, reject) => {
-    // ffmpeg scene filter outputs a score for each frame where a scene change is detected
+  // For long videos, skip frames to speed up analysis
+  // fps=2 = analyze 2 frames/sec instead of all 24-60
+  const fpsFilter = isVeryLong ? 'fps=1,' : isLong ? 'fps=2,' : '';
+  // Downscale to 640px width — scene detection doesn't need full resolution
+  const scaleFilter = 'scale=640:-1,';
+
+  const timeoutMs = isVeryLong ? 180000 : isLong ? 120000 : 90000;
+
+  console.log(`[scene] Detecting scene changes (${Math.round(videoDurationS / 60)}min video, ${isLong ? 'optimized' : 'full'} mode, timeout=${timeoutMs / 1000}s)...`);
+
+  return new Promise((resolve) => {
     const args = [
       '-i', videoPath,
-      '-vf', `select='gt(scene,${sceneThreshold})',showinfo`,
+      '-vf', `${scaleFilter}${fpsFilter}select='gt(scene,${sceneThreshold})',showinfo`,
       '-f', 'null',
       '-',
     ];
@@ -31,13 +41,14 @@ export async function detectSceneChanges(
     const proc = spawn(FFMPEG_PATH, args, { stdio: ['pipe', 'pipe', 'pipe'] });
 
     let stderr = '';
+    let timedOut = false;
+
     proc.stderr.on('data', (chunk) => {
       stderr += chunk.toString();
     });
 
     proc.on('close', () => {
       // Parse timestamps of scene changes from showinfo output
-      // Lines look like: [Parsed_showinfo_1 ...] n:  45 pts: 123456 pts_time:1.234 ...
       const regex = /pts_time:\s*([\d.]+)/g;
       const sceneChangeTimes: number[] = [];
 
@@ -46,7 +57,11 @@ export async function detectSceneChanges(
         sceneChangeTimes.push(parseFloat(match[1]));
       }
 
-      console.log(`[scene] Found ${sceneChangeTimes.length} scene changes`);
+      if (timedOut) {
+        console.log(`[scene] Timed out after ${timeoutMs / 1000}s — using ${sceneChangeTimes.length} scene changes found so far`);
+      } else {
+        console.log(`[scene] Found ${sceneChangeTimes.length} scene changes`);
+      }
 
       if (sceneChangeTimes.length === 0) {
         resolve([]);
@@ -81,7 +96,13 @@ export async function detectSceneChanges(
 
     proc.on('error', (err) => {
       console.error(`[scene] Detection failed: ${err.message}`);
-      resolve([]); // Don't reject, just return empty
+      resolve([]);
     });
+
+    // Safety timeout — kill and use partial results
+    setTimeout(() => {
+      timedOut = true;
+      try { proc.kill(); } catch {}
+    }, timeoutMs);
   });
 }

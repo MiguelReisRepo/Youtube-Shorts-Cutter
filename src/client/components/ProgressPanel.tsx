@@ -5,9 +5,10 @@ interface Props {
   progress: CutProgress;
   onDownload: (filename: string) => void;
   onReset: () => void;
+  onBackToClips: () => void;
 }
 
-export const ProgressPanel: React.FC<Props> = ({ progress, onDownload, onReset }) => {
+export const ProgressPanel: React.FC<Props> = ({ progress, onDownload, onReset, onBackToClips }) => {
   const pct =
     progress.totalClips > 0
       ? Math.round(
@@ -100,14 +101,22 @@ export const ProgressPanel: React.FC<Props> = ({ progress, onDownload, onReset }
         </div>
       )}
 
-      {/* Reset button */}
+      {/* Action buttons */}
       {(progress.status === 'done' || progress.status === 'error') && (
-        <button
-          onClick={onReset}
-          className="mt-4 w-full py-2.5 rounded-lg border border-[var(--border)] text-sm font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:border-[#3a3a3e] transition-colors"
-        >
-          ← Process another video
-        </button>
+        <div className="mt-4 flex gap-2">
+          <button
+            onClick={onBackToClips}
+            className="flex-1 py-2.5 rounded-lg border border-[var(--accent)] text-sm font-medium text-[var(--accent)] hover:bg-[var(--accent-dim)] transition-colors"
+          >
+            ← Back to clips
+          </button>
+          <button
+            onClick={onReset}
+            className="flex-1 py-2.5 rounded-lg border border-[var(--border)] text-sm font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:border-[#3a3a3e] transition-colors"
+          >
+            New video
+          </button>
+        </div>
       )}
     </div>
   );

@@ -16,7 +16,11 @@ export async function analyzeAudioEnergy(
   windowS: number = 2,
   knownDurationS?: number,
 ): Promise<HeatmapPoint[]> {
-  console.log('[audio] Analyzing audio energy (single-pass)...');
+  // Scale timeout with video duration: 2min base, +30s per hour of video
+  const durationHours = (knownDurationS || 0) / 3600;
+  const timeoutMs = Math.min(300000, 120000 + Math.floor(durationHours) * 30000); // cap at 5min
+
+  console.log(`[audio] Analyzing audio energy (single-pass, timeout=${timeoutMs / 1000}s)...`);
 
   return new Promise((resolve) => {
     const args = [
@@ -32,14 +36,13 @@ export async function analyzeAudioEnergy(
     let stderr = '';
     const rmsValues: { timeS: number; rms: number }[] = [];
     let currentTime = 0;
+    let timedOut = false;
 
     proc.stderr.on('data', (data: Buffer) => {
       stderr += data.toString();
 
-      // Parse time progress and RMS values from stderr
       const text = data.toString();
 
-      // Extract current timestamp from progress lines
       const timeMatch = text.match(/time=(\d+):(\d+):(\d+)\.(\d+)/);
       if (timeMatch) {
         currentTime = parseInt(timeMatch[1]) * 3600 +
@@ -48,25 +51,26 @@ export async function analyzeAudioEnergy(
                      parseInt(timeMatch[4]) / 100;
       }
 
-      // Extract RMS level from astats metadata
-      // Look for: lavfi.astats.Overall.RMS_level=-XX.XX
       const rmsMatches = text.matchAll(/RMS_level=([-\d.]+)/g);
       for (const m of rmsMatches) {
         const rmsDb = parseFloat(m[1]);
-        if (!isNaN(rmsDb) && rmsDb > -100) { // Filter out silence (-inf)
+        if (!isNaN(rmsDb) && rmsDb > -100) {
           rmsValues.push({ timeS: currentTime, rms: rmsDb });
         }
       }
     });
 
     proc.on('close', () => {
+      if (timedOut && rmsValues.length > 0) {
+        console.log(`[audio] Timed out — using ${rmsValues.length} samples collected so far`);
+      }
+
       if (rmsValues.length === 0) {
         console.log('[audio] astats produced no data, trying volumedetect fallback...');
         analyzeWithVolumeDetect(videoPath, windowS, knownDurationS).then(resolve);
         return;
       }
 
-      // Convert dB RMS to 0-1 intensity, aggregated into windows
       const points = rmsToHeatmap(rmsValues, windowS);
       console.log(`[audio] ✅ Single-pass analysis: ${points.length} data points`);
       resolve(points);
@@ -77,10 +81,11 @@ export async function analyzeAudioEnergy(
       analyzeWithVolumeDetect(videoPath, windowS, knownDurationS).then(resolve);
     });
 
-    // Safety timeout: 2 minutes max
+    // Duration-aware timeout — use partial results if killed
     setTimeout(() => {
+      timedOut = true;
       try { proc.kill(); } catch {}
-    }, 120000);
+    }, timeoutMs);
   });
 }
 

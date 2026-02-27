@@ -2,8 +2,8 @@ import { execFile, spawn } from 'child_process';
 import { promisify } from 'util';
 import path from 'path';
 import fs from 'fs';
-import type { PeakSegment, CutProgress, CaptionPreset } from '../types/index.js';
-import { YTDLP_PATH, FFMPEG_PATH } from './binPaths.js';
+import type { PeakSegment, CutProgress, CaptionPreset, SubtitleEntry } from '../types/index.js';
+import { YTDLP_PATH, FFMPEG_PATH, YTDLP_COMMON_ARGS } from './binPaths.js';
 import { getSubtitles, generateASSFile, clearSubtitleCache, CAPTION_PRESETS, DEFAULT_CAPTION_STYLE } from './captionEngine.js';
 import { analyzeReframe, buildCropFilter } from './smartReframe.js';
 import { translateSubtitles, TRANSLATION_TARGETS, type TranslationTarget } from './translationEngine.js';
@@ -46,11 +46,10 @@ async function downloadSegment(
   );
 
   try {
-    // --download-sections doesn't reliably merge separate video+audio streams
-    // Use best pre-muxed format for segments (short clips, quality is fine)
-    // Then re-encode to target quality in cutClip anyway
+    // Download best quality video+audio, merge via ffmpeg
     await execFileAsync(YTDLP_PATH, [
-      '-f', 'best[height<=1080]/bestvideo[height<=1080]+bestaudio/best',
+      ...YTDLP_COMMON_ARGS,
+      '-f', 'bestvideo[height<=1080]+bestaudio/best[height<=1080]',
       '--merge-output-format', 'mp4',
       '--download-sections', sectionArg,
       '--force-keyframes-at-cuts',
@@ -110,6 +109,7 @@ async function downloadFullFallback(
   const outputTemplate = path.join(TEMP_DIR, 'full_%(id)s.%(ext)s');
 
   await execFileAsync(YTDLP_PATH, [
+    ...YTDLP_COMMON_ARGS,
     '-f', 'bestvideo[height<=1080]+bestaudio/best[height<=1080]',
     '--merge-output-format', 'mp4',
     '-o', outputTemplate,
@@ -132,15 +132,22 @@ export async function downloadVideo(
   url: string,
   onProgress?: (msg: string) => void,
   outputDir?: string,
+  analysisMode: boolean = false,
 ): Promise<string> {
-  onProgress?.('Starting download...');
+  // In analysis mode, download lowest quality — we only need audio energy + scene detection
+  const format = analysisMode
+    ? 'worst[ext=mp4]/bestvideo[height<=360]+bestaudio/best[height<=360]'
+    : 'bestvideo[height<=1080]+bestaudio/best[height<=1080]';
+
+  onProgress?.(analysisMode ? 'Downloading (low quality for analysis)...' : 'Starting download...');
 
   const targetDir = outputDir || TEMP_DIR;
   fs.mkdirSync(targetDir, { recursive: true });
   const outputTemplate = path.join(targetDir, '%(id)s.%(ext)s');
 
   await execFileAsync(YTDLP_PATH, [
-    '-f', 'bestvideo[height<=1080]+bestaudio/best[height<=1080]',
+    ...YTDLP_COMMON_ARGS,
+    '-f', format,
     '--merge-output-format', 'mp4',
     '-o', outputTemplate,
     '--no-warnings',
@@ -186,6 +193,8 @@ async function cutClip(
       '-i', inputPath,
       '-t', String(duration),
       '-vf', reframeCropFilter,
+      '-map', '0:v',
+      '-map', '0:a?',
       '-c:v', 'libx264',
       '-preset', 'medium',
       '-crf', String(crf),
@@ -203,7 +212,7 @@ async function cutClip(
       `[0:v]scale=${width}:${height}:force_original_aspect_ratio=increase,`,
       `crop=${width}:${height},boxblur=20:5[bg];`,
       `[0:v]scale=${width}:${height}:force_original_aspect_ratio=decrease[fg];`,
-      `[bg][fg]overlay=(W-w)/2:(H-h)/2`,
+      `[bg][fg]overlay=(W-w)/2:(H-h)/2[outv]`,
     ].join('');
 
     ffmpegArgs = [
@@ -212,6 +221,8 @@ async function cutClip(
       '-i', inputPath,
       '-t', String(duration),
       '-filter_complex', filterComplex,
+      '-map', '[outv]',
+      '-map', '0:a?',
       '-c:v', 'libx264',
       '-preset', 'medium',
       '-crf', String(crf),
@@ -232,6 +243,8 @@ async function cutClip(
       '-i', inputPath,
       '-t', String(duration),
       '-vf', `scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:black`,
+      '-map', '0:v',
+      '-map', '0:a?',
       '-c:v', 'libx264',
       '-preset', 'medium',
       '-crf', String(crf),
@@ -251,6 +264,8 @@ async function cutClip(
       '-i', inputPath,
       '-t', String(duration),
       '-vf', `scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height}`,
+      '-map', '0:v',
+      '-map', '0:a?',
       '-c:v', 'libx264',
       '-preset', 'medium',
       '-crf', String(crf),
@@ -301,6 +316,7 @@ export async function processJob(
   quality: string = '1080',
   translateTo: string = '',        // '' = none, 'pt-BR', 'es'
   translateMode: string = '',      // '' = none, 'captions', 'dub', 'both'
+  editedSubtitles?: Record<string, SubtitleEntry[]>,
 ): Promise<void> {
   const totalDurationS = segments.reduce((sum, s) => sum + (s.endS - s.startS), 0);
 
@@ -398,7 +414,13 @@ export async function processJob(
         });
 
         try {
-          let subs = await getSubtitles(url, segmentPath, seg.startS, seg.endS);
+          let subs: SubtitleEntry[];
+          if (editedSubtitles?.[seg.id]?.length) {
+            subs = editedSubtitles[seg.id];
+            console.log(`   Using ${subs.length} user-edited subtitle entries`);
+          } else {
+            subs = await getSubtitles(url, segmentPath, seg.startS, seg.endS);
+          }
 
           // ── 4a: Translate subtitles if requested ───
           let translatedSubs = subs;
@@ -437,7 +459,8 @@ export async function processJob(
               const captionedPath = outputPath.replace('.mp4', '_captioned.mp4');
 
               await new Promise<void>((resolve, reject) => {
-                const assEscaped = assPath.replace(/'/g, "\\'").replace(/:/g, '\\:');
+                // ffmpeg ass filter needs backslashes and colons escaped
+                const assEscaped = assPath.replace(/\\/g, '/').replace(/:/g, '\\:');
                 const proc = spawn(FFMPEG_PATH, [
                   '-y', '-i', outputPath,
                   '-vf', `ass='${assEscaped}'`,
@@ -561,13 +584,14 @@ async function getVideoResolution(filePath: string): Promise<string | null> {
  */
 async function checkHasAudio(filePath: string): Promise<boolean> {
   try {
+    const nullDevice = process.platform === 'win32' ? 'NUL' : '/dev/null';
     // Try to extract 1 frame of audio — succeeds only if audio exists
     await execFileAsync(FFMPEG_PATH, [
       '-i', filePath,
       '-t', '0.1',
       '-vn',
       '-f', 'wav',
-      '-y', '/dev/null',
+      '-y', nullDevice,
     ], { timeout: 10000 });
     return true;
   } catch (err: any) {

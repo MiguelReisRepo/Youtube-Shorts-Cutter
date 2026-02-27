@@ -2,6 +2,7 @@ import React, { useState, useCallback } from 'react';
 import type {
   VideoInfo, HeatmapPoint, PeakSegment, CutProgress,
   DetectionResult, ClipSettings, ViralityBreakdown, CaptionPreset,
+  SubtitleEntry,
 } from '../types/index';
 import { DEFAULT_CLIP_SETTINGS } from '../types/index';
 import { HeatmapChart } from './components/HeatmapChart';
@@ -11,10 +12,12 @@ import { DetectionBadge } from './components/DetectionBadge';
 import { ClipSettingsPanel } from './components/ClipSettingsPanel';
 import { PreviewPlayer } from './components/PreviewPlayer';
 import { BatchPanel } from './components/BatchPanel';
+import { CaptionEditor } from './components/CaptionEditor';
+import { ChannelDownloadPanel } from './components/ChannelDownloadPanel';
 
 type AppState = 'idle' | 'analyzing' | 'ready' | 'processing';
 type CropType = 'center' | 'blur_pad' | 'letterbox' | 'smart_reframe';
-type AppMode = 'single' | 'batch';
+type AppMode = 'single' | 'batch' | 'download';
 type VideoQuality = '1080' | '720' | '480';
 
 const QUALITY_OPTIONS = [
@@ -55,6 +58,7 @@ const App: React.FC = () => {
   const [quality, setQuality] = useState<VideoQuality>('1080');
   const [translateTo, setTranslateTo] = useState('');
   const [translateMode, setTranslateMode] = useState('');
+  const [editedSubtitles, setEditedSubtitles] = useState<Record<string, SubtitleEntry[]>>({});
 
   // ─── Analyze Video ──────────────────────────────
 
@@ -157,6 +161,7 @@ const App: React.FC = () => {
           quality,
           translateTo,
           translateMode,
+          editedSubtitles: Object.keys(editedSubtitles).length > 0 ? editedSubtitles : undefined,
         }),
       });
       if (!res.ok) throw new Error('Failed to start processing');
@@ -191,6 +196,12 @@ const App: React.FC = () => {
     setAppState('idle'); setUrl(''); setVideo(null); setHeatmap([]);
     setSegments([]); setDetection(null); setViralityScores([]);
     setSelectedIds(new Set()); setProgress(null); setError(null);
+    setEditedSubtitles({});
+  }, []);
+
+  const handleBackToClips = useCallback(() => {
+    setAppState('ready');
+    setProgress(null);
   }, []);
 
   const selectedCount = selectedIds.size;
@@ -236,11 +247,27 @@ const App: React.FC = () => {
             <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><rect x="1" y="1" width="4" height="4" rx="0.5" stroke="currentColor" strokeWidth="1.2"/><rect x="7" y="1" width="4" height="4" rx="0.5" stroke="currentColor" strokeWidth="1.2"/><rect x="1" y="7" width="4" height="4" rx="0.5" stroke="currentColor" strokeWidth="1.2"/><rect x="7" y="7" width="4" height="4" rx="0.5" stroke="currentColor" strokeWidth="1.2"/></svg>
             Batch (up to 20)
           </button>
+          <button
+            onClick={() => setAppMode('download')}
+            className={`px-4 py-2 rounded-lg text-xs font-display font-bold transition-all flex items-center gap-1.5 ${
+              appMode === 'download'
+                ? 'bg-[var(--accent)] text-black'
+                : 'bg-[var(--bg-secondary)] border border-[var(--border)] text-[var(--text-secondary)] hover:border-[#3a3a3e]'
+            }`}
+          >
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M6 1V8M6 8L3 5M6 8L9 5M1 11H11" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+            Channel Download
+          </button>
         </div>
 
         {/* ── Batch Mode ─────────────────────────── */}
         {appMode === 'batch' && (
           <BatchPanel onBack={() => setAppMode('single')} />
+        )}
+
+        {/* ── Channel Download Mode ────────────────── */}
+        {appMode === 'download' && (
+          <ChannelDownloadPanel onBack={() => setAppMode('single')} />
         )}
 
         {appMode === 'single' && (<>
@@ -435,7 +462,7 @@ const App: React.FC = () => {
                     {CAPTION_OPTIONS.map(opt => (
                       <button
                         key={opt.value}
-                        onClick={() => setCaptionPreset(opt.value)}
+                        onClick={() => { setCaptionPreset(opt.value); if (opt.value === 'off') setEditedSubtitles({}); }}
                         className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg border transition-all text-left ${
                           captionPreset === opt.value
                             ? 'bg-[var(--accent-dim)] border-[var(--accent)]'
@@ -451,6 +478,17 @@ const App: React.FC = () => {
                     ))}
                   </div>
                 </div>
+
+                {/* Caption Editor */}
+                {captionPreset !== 'off' && appState === 'ready' && (
+                  <CaptionEditor
+                    url={url}
+                    segments={segments}
+                    selectedIds={selectedIds}
+                    subtitles={editedSubtitles}
+                    onSubtitlesChange={setEditedSubtitles}
+                  />
+                )}
 
                 {/* Translation */}
                 <div>
@@ -555,7 +593,7 @@ const App: React.FC = () => {
         {/* ── Processing Progress ────────────────── */}
         {appState === 'processing' && progress && (
           <div className="mt-8">
-            <ProgressPanel progress={progress} onDownload={handleDownload} onReset={handleReset} />
+            <ProgressPanel progress={progress} onDownload={handleDownload} onReset={handleReset} onBackToClips={handleBackToClips} />
           </div>
         )}
 

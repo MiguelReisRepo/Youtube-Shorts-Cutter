@@ -59,6 +59,14 @@ export interface ViralityBreakdown {
   color: string;
 }
 
+// ─── Subtitles ─────────────────────────────────────
+
+export interface SubtitleEntry {
+  startS: number;
+  endS: number;
+  text: string;
+}
+
 // ─── Caption Options ────────────────────────────────
 
 export type CaptionPreset = 'off' | 'classic' | 'tiktok' | 'minimal' | 'bold_pop';
@@ -102,6 +110,7 @@ export interface CutRequest {
   cropMode: 'center' | 'blur_pad' | 'smart_reframe';
   captions: CaptionPreset;
   videoTitle: string;
+  editedSubtitles?: Record<string, SubtitleEntry[]>;
 }
 
 export interface CutProgress {
@@ -117,3 +126,23 @@ export type JobStatus = {
   id: string;
   progress: CutProgress;
 };
+
+// ─── Channel Download ─────────────────────────────
+
+export interface ChannelVideo {
+  id: string;
+  title: string;
+  thumbnail: string;
+  durationS: number;
+  url: string;
+}
+
+export interface ChannelDownloadProgress {
+  status: 'listing' | 'downloading' | 'zipping' | 'done' | 'error';
+  currentVideo: number;
+  totalVideos: number;
+  message: string;
+  files?: string[];
+  zipFile?: string;
+  error?: string;
+}

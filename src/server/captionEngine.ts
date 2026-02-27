@@ -3,9 +3,12 @@ import { promisify } from 'util';
 import path from 'path';
 import fs from 'fs';
 import os from 'os';
-import { YTDLP_PATH, FFMPEG_PATH } from './binPaths.js';
+import { YTDLP_PATH, FFMPEG_PATH, YTDLP_COMMON_ARGS } from './binPaths.js';
+import type { SubtitleEntry } from '../types/index.js';
 
 const execFileAsync = promisify(execFile);
+
+export type { SubtitleEntry };
 
 export interface CaptionStyle {
   fontName: string;
@@ -72,12 +75,6 @@ export const CAPTION_PRESETS = {
   },
 };
 
-interface SubtitleEntry {
-  startS: number;
-  endS: number;
-  text: string;
-}
-
 // ─── Subtitle Cache ─────────────────────────────────
 // Download subtitles ONCE per video, then slice per segment
 
@@ -141,6 +138,34 @@ export async function getSubtitles(
 }
 
 /**
+ * Fetch subtitles for preview/editing (YouTube subs only, no Whisper).
+ * Fast because it doesn't require downloading the video.
+ */
+export async function getSubtitlesForPreview(
+  videoUrl: string,
+  startS: number,
+  endS: number,
+): Promise<SubtitleEntry[]> {
+  if (subtitleCache && subtitleCache.videoUrl === videoUrl) {
+    const sliced = sliceSubtitles(subtitleCache.entries, startS, endS);
+    if (sliced.length > 0) return sliced;
+  }
+
+  if (!subtitleCache || subtitleCache.videoUrl !== videoUrl) {
+    console.log('[captions] Downloading YouTube subtitles for preview...');
+    const result = await downloadYouTubeSubtitlesFull(videoUrl);
+    if (result) {
+      subtitleCache = { videoUrl, entries: result.entries, language: result.language };
+      console.log(`[captions] ✅ Cached ${result.entries.length} subtitle entries (${result.language})`);
+      const sliced = sliceSubtitles(result.entries, startS, endS);
+      if (sliced.length > 0) return sliced;
+    }
+  }
+
+  return [];
+}
+
+/**
  * Slice cached full-video subtitles to a specific time range.
  * Returns entries with timestamps relative to the segment start.
  */
@@ -177,6 +202,7 @@ async function downloadYouTubeSubtitlesFull(
     // First, try to get any available subtitles
     try {
       await execFileAsync(YTDLP_PATH, [
+        ...YTDLP_COMMON_ARGS,
         '--write-auto-sub',
         '--sub-lang', 'pt,pt-BR,en,es,fr,de,it,ja,ko,zh',
         '--sub-format', 'json3',
@@ -188,6 +214,7 @@ async function downloadYouTubeSubtitlesFull(
     } catch {
       // If that fails, try without specifying language
       await execFileAsync(YTDLP_PATH, [
+        ...YTDLP_COMMON_ARGS,
         '--write-auto-sub',
         '--sub-format', 'json3',
         '--skip-download',
@@ -482,7 +509,8 @@ export async function burnCaptions(
 
   // Use the ass filter to overlay subtitles
   // The fontsdir helps find system fonts
-  const assPathEscaped = assPath.replace(/'/g, "\\'").replace(/:/g, '\\:');
+  // ffmpeg ass filter needs forward slashes on Windows + escaped colons
+  const assPathEscaped = assPath.replace(/\\/g, '/').replace(/:/g, '\\:');
 
   return new Promise((resolve, reject) => {
     const proc = spawn(FFMPEG_PATH, [

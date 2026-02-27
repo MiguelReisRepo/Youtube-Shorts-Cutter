@@ -1,7 +1,7 @@
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import type { HeatmapPoint } from '../types/index.js';
-import { YTDLP_PATH } from './binPaths.js';
+import { YTDLP_PATH, YTDLP_COMMON_ARGS } from './binPaths.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -30,6 +30,7 @@ export async function scrapeCommentTimestamps(
   try {
     // Fetch comments using yt-dlp
     const { stdout } = await execFileAsync(YTDLP_PATH, [
+      ...YTDLP_COMMON_ARGS,
       '--write-comments',
       '--no-download',
       '--dump-json',

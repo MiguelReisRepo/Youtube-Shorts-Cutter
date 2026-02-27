@@ -2,7 +2,7 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import type { HeatmapPoint, VideoInfo, PeakSegment } from '../types/index.js';
 import { v4 as uuid } from 'uuid';
-import { YTDLP_PATH } from './binPaths.js';
+import { YTDLP_PATH, YTDLP_COMMON_ARGS } from './binPaths.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -15,6 +15,7 @@ export async function getVideoData(url: string): Promise<{
   console.log(`[youtube] Fetching data for: ${url}`);
 
   const { stdout } = await execFileAsync(YTDLP_PATH, [
+    ...YTDLP_COMMON_ARGS,
     '--dump-json',
     '--no-download',
     '--no-warnings',

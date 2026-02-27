@@ -83,3 +83,10 @@ function findFfmpeg(): string {
 
 export const YTDLP_PATH = findYtDlp();
 export const FFMPEG_PATH = findFfmpeg();
+
+// Common yt-dlp args: cookies for auth, JS runtime for YouTube challenges, ffmpeg for merging
+export const YTDLP_COMMON_ARGS = [
+  '--cookies-from-browser', 'firefox',
+  '--js-runtimes', 'node',
+  '--ffmpeg-location', path.dirname(FFMPEG_PATH),
+];
